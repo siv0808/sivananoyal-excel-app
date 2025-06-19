@@ -1,60 +1,62 @@
 
 import streamlit as st
 import pandas as pd
-import io
+import base64
+from io import BytesIO
 
-st.set_page_config(page_title="עיבוד נתונים ועמלות אקסל - סיון אמויאל")
-st.title("עיבוד נתונים ועמלות אקסל - סיון אמויאל")
+st.set_page_config(page_title="עיבוד נתוני אקסל - סיון אמויאל", layout="centered")
 
-uploaded_file = st.file_uploader("העלה קובץ אקסל", type=["xlsx"])
+st.title("עיבוד נתוני אקסל - סיון אמויאל")
+st.markdown("העלה קובץ אקסל עם נתוני קלט:")
 
-if uploaded_file is not None:
+uploaded_file = st.file_uploader("בחר קובץ", type=["xlsx"])
+
+def process_excel(file):
+    df_input = pd.read_excel(file, sheet_name=0)
+    df_data = pd.read_excel(file, sheet_name=1)
+
+    df_data = df_data.dropna(subset=['מס פוליסה', 'עמלה'])
+
+    merged = df_input.merge(df_data, on='מס פוליסה', how='left')
+    grouped = df_data.groupby('מס פוליסה')['עמלה'].apply(lambda x: ', '.join(map(str, x))).reset_index()
+    totals = df_data.groupby('מס פוליסה')['עמלה'].sum().reset_index(name='סה"כ עמלות לפוליסה')
+
+    final = df_input.merge(grouped, on='מס פוליסה', how='left')
+    final = final.merge(totals, on='מס פוליסה', how='left')
+    final = final.rename(columns={'עמלה': 'עמלות'})
+
+    return final
+
+def generate_download_link(df):
+    output = BytesIO()
+    with pd.ExcelWriter(output, engine='openpyxl') as writer:
+        df.to_excel(writer, index=False, sheet_name='פלט')
+    processed_data = output.getvalue()
+    b64 = base64.b64encode(processed_data).decode()
+    href = f'<a href="data:application/octet-stream;base64,{b64}" download="פלט_מעובד.xlsx">📥 הורד את הקובץ המעובד</a>'
+    return href
+
+if uploaded_file:
     try:
-        # קריאת הגיליונות
-        df1 = pd.read_excel(uploaded_file, sheet_name=0)
-        df2 = pd.read_excel(uploaded_file, sheet_name=1)
+        result_df = process_excel(uploaded_file)
+        st.success("✅ הקובץ עובד בהצלחה!")
+        st.write(result_df)
 
-        # שינוי שמות העמודות בעברית
-        df1.columns = ['מספר פוליסה']
-        df2.columns = ['מספר פוליסה', 'עמלה']
-
-        # המרת עמודת "עמלה" למספרים, הסרת תאריכים או תווים חריגים
-        df2['עמלה'] = pd.to_numeric(df2['עמלה'], errors='coerce')
-
-        # קיבוץ וסיכום העמלות לפי מספר פוליסה
-        df_sum = df2.groupby('מספר פוליסה')['עמלה'].sum().reset_index()
-        df_sum.rename(columns={'עמלה': 'סהכ_עמלות'}, inplace=True)
-
-        # חיבור כל העמלות לפי פוליסה למחרוזת מופרדת בפסיקים
-        df_joined = df2.groupby('מספר פוליסה')['עמלה'].apply(
-            lambda x: ', '.join(str(v) for v in x.dropna())
-        ).reset_index()
-        df_joined.rename(columns={'עמלה': 'עמלות'}, inplace=True)
-
-        # מיזוג הכל
-        result = df1.merge(df_joined, on='מספר פוליסה', how='left').merge(df_sum, on='מספר פוליסה', how='left')
-
-        # הצגת הטבלה
-        st.dataframe(result)
-
-        # המרה לאקסל
-        def convert_df(df):
-            output = io.BytesIO()
-            with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
-                df.to_excel(writer, index=False)
-            return output.getvalue()
-
-        st.download_button(
-            label="📥 הורד קובץ אקסל מעובד",
-            data=convert_df(result),
-            file_name="processed_output.xlsx",
-            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-        )
-
-        st.success("✅ העיבוד הושלם בהצלחה! ניתן להוריד את הקובץ המעובד.")
+        st.markdown(generate_download_link(result_df), unsafe_allow_html=True)
 
     except Exception as e:
         st.error(f"שגיאה בעיבוד הקובץ: {e}")
 
-st.markdown("---")
-st.markdown("<p style='font-size:12px; text-align:center;'>כל הזכויות שמורות - ym & סיון אמויאל</p>", unsafe_allow_html=True)
+# Disclaimer in small font
+st.markdown(
+    """
+    <hr>
+    <div style='direction: rtl; text-align: center; font-size: 12px; color: gray;'>
+    <strong>כתב ויתור ואזהרת שימוש</strong><br>
+    כל הזכויות שמורות ©. אין להעתיק, לשכפל, להפיץ, לתרגם, לעשות שימוש מסחרי או ציבורי בתכני האתר, באפליקציה או בתוצריה, כולם או חלקם, בכל צורה שהיא – ללא קבלת אישור מראש ובכתב מכותב האתר. אי מציאת הכותב איננה מתירה כל זכות לבצע את האמור לעיל.<br><br>
+    האחריות הבלעדית לשימוש באפליקציה ו/או בתוצריה חלה על המשתמש בלבד. על המשתמש לבדוק היטב את נכונות, דיוק והתאמה של הפלטים, הנתונים והתוצרים לצרכיו ולוודא כי הם מתאימים למטרותיו לפני כל שימוש בהם.<br><br>
+    הכותב ו/או מי מטעמו אינו נושא באחריות לכל נזק, ישיר או עקיף, שייגרם עקב שימוש בשירותי האתר, האפליקציה או בתוצריהם.
+    </div>
+    """,
+    unsafe_allow_html=True
+)
